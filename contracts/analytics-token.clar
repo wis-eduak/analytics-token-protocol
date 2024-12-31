@@ -344,3 +344,11 @@
         (is-eq lock-period u4320)  ;; 1 month
         (is-eq lock-period u8640)  ;; 2 months
     )
+)
+
+(define-private (is-valid-voting-period (period uint))
+    (and 
+        (>= period u100)     ;; Minimum voting blocks
+        (<= period u2880)    ;; Maximum voting blocks (approximately 1 day)
+    )
+)
