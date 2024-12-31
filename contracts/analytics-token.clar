@@ -85,3 +85,93 @@
         features-enabled: (list 10 bool)
     }
 )
+
+;; Public Functions
+
+;; Contract Administration
+(define-public (initialize-contract)
+    (begin
+        (asserts! (is-eq tx-sender CONTRACT-OWNER) ERR-NOT-AUTHORIZED)
+        
+        ;; Set up tier levels
+        (map-set TierLevels u1 
+            {
+                minimum-stake: u1000000,  ;; 1M uSTX
+                reward-multiplier: u100,  ;; 1x
+                features-enabled: (list true false false false false false false false false false)
+            })
+        (map-set TierLevels u2
+            {
+                minimum-stake: u5000000,  ;; 5M uSTX
+                reward-multiplier: u150,  ;; 1.5x
+                features-enabled: (list true true true false false false false false false false)
+            })
+        (map-set TierLevels u3
+            {
+                minimum-stake: u10000000, ;; 10M uSTX
+                reward-multiplier: u200,  ;; 2x
+                features-enabled: (list true true true true true false false false false false)
+            })
+        (ok true)
+    )
+)
+
+;; Staking Functions
+(define-public (stake-stx (amount uint) (lock-period uint))
+    (let
+        (
+            (current-position (default-to 
+                {
+                    total-collateral: u0,
+                    total-debt: u0,
+                    health-factor: u0,
+                    last-updated: u0,
+                    stx-staked: u0,
+                    analytics-tokens: u0,
+                    voting-power: u0,
+                    tier-level: u0,
+                    rewards-multiplier: u100
+                }
+                (map-get? UserPositions tx-sender)))
+        )
+        (asserts! (is-valid-lock-period lock-period) ERR-INVALID-PROTOCOL)
+        (asserts! (not (var-get contract-paused)) ERR-PAUSED)
+        (asserts! (>= amount (var-get minimum-stake)) ERR-BELOW-MINIMUM)
+        
+        (try! (stx-transfer? amount tx-sender (as-contract tx-sender)))
+        
+        (let
+            (
+                (new-total-stake (+ (get stx-staked current-position) amount))
+                (tier-info (get-tier-info new-total-stake))
+                (lock-multiplier (calculate-lock-multiplier lock-period))
+            )
+            
+            (map-set StakingPositions
+                tx-sender
+                {
+                    amount: amount,
+                    start-block: block-height,
+                    last-claim: block-height,
+                    lock-period: lock-period,
+                    cooldown-start: none,
+                    accumulated-rewards: u0
+                }
+            )
+            
+            (map-set UserPositions
+                tx-sender
+                (merge current-position
+                    {
+                        stx-staked: new-total-stake,
+                        tier-level: (get tier-level tier-info),
+                        rewards-multiplier: (* (get reward-multiplier tier-info) lock-multiplier)
+                    }
+                )
+            )
+            
+            (var-set stx-pool (+ (var-get stx-pool) amount))
+            (ok true)
+        )
+    )
+)
